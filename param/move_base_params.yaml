@@ -6,4 +6,6 @@ conservative_reset_dist: 3.0
 planner_frequency: 5.0
 oscillation_timeout: 10.0
 oscillation_distance: 0.2
-
+global_frame: map # was not here
+odom_frame: odom # was not here
+base_frame: base_link # was not here
