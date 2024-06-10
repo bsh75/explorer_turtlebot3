@@ -37,21 +37,13 @@ class ExplorationNode:
     def odom_callback(self, msg: Odometry):
         self.robot_pose = msg.pose.pose
 
-    # def find_unexplored_areas(self):
-    #     if self.global_map_data is None:
-    #         rospy.logerr("Map data not available yet")
-    #         return None
-
-    #     data = np.array(self.global_map_data.data).reshape((self.global_map_data.info.height, self.global_map_data.info.width))
-    #     unexplored = np.where(data == -1)
-    #     unexplored_points = list(zip(unexplored[0], unexplored[1]))
-
-    #     return unexplored_points
 
     def find_unexplored_areas(self):
         if self.global_map_data is None:
             rospy.logerr("Map data not available yet")
             return None
+        
+        start_time = rospy.get_time()  # Record the start time
 
         # Robot size (in meters) - adjust these values to match your robot
         robot_radius = 0.3 # Radius of the waffle robot plus clearance doubled
@@ -64,39 +56,41 @@ class ExplorationNode:
 
         # Calculate robot size and clearance in cells
         robot_radius_cells = int(np.ceil(robot_radius / resolution))
-        robot_cells_range = range(-int(robot_radius_cells), int(robot_radius_cells))
-        rospy.logwarn(f"robot_radius cells: {robot_radius_cells}\nrobot_radius range: {robot_cells_range}")
+        rospy.logwarn(f"robot_radius cells: {robot_radius_cells}")
 
-        # Occupancy threshold for unexplored areas (0-100)
-        unexplored_count = 0
+        # Initialize unexplored points list
+        unexplored_points = []
+
+        # Create a padded version of the map to handle edge cases easily
+        padded_map = np.pad(global_map_data, pad_width=robot_radius_cells, mode='constant', constant_values=100)
+
+        # Find unexplored areas
+        unexplored_count = np.sum(global_map_data == -1)
         bound_breaks = 0
         occupied_breaks = 0
-        
-        unexplored_points = []
-        for y in range(height):
-            for x in range(width):
-                if global_map_data[y][x] == -1:  # Check cell is uknown
-                    # Check if area around this point is unexplored
-                    unexplored_count += 1
-                    is_valid_area = True
-                    for dx in robot_cells_range:
-                        for dy in robot_cells_range:
-                            nx, ny = x + dx, y + dy
-                            if not (0 <= nx < width and 0 <= ny < height):
-                                is_valid_area = False  # Out of bounds
-                                bound_breaks += 1
-                                break
-                            elif global_map_data[ny][nx] != -1:  
-                                is_valid_area = False  # Not occupied
-                                occupied_breaks += 1
-                                break
-                        if not is_valid_area:
-                            break
 
-                    if is_valid_area:
-                        unexplored_points.append((y, x))
+        # Identify unexplored cells
+        unexplored_cells = np.argwhere(global_map_data == -1)
+
+        for cell in unexplored_cells:
+            y, x = cell
+
+            # Extract the region around the cell
+            region = padded_map[y:y + 2 * robot_radius_cells + 1, x:x + 2 * robot_radius_cells + 1]
+
+            # Check if all cells in the region are unexplored (-1)
+            if np.all(region == -1):
+                unexplored_points.append((y, x))
+            else:
+                occupied_breaks += 1
+
         rospy.logerr(f"found {len(unexplored_points)} out of {unexplored_count}")
         rospy.logerr(f"Bound b {bound_breaks}, Occ B {occupied_breaks}")
+
+        end_time = rospy.get_time()  # Record the end time
+        execution_time = end_time - start_time  # Calculate the execution time
+
+        rospy.loginfo(f"Execution time for find_unexplored_areas: {execution_time} seconds")
         return unexplored_points
 
 
