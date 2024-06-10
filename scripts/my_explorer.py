@@ -8,6 +8,7 @@ from tf.transformations import euler_from_quaternion
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import GoalStatusArray, GoalStatus
 import actionlib
+from visualization_msgs.msg import Marker, MarkerArray
 
 class ExplorationNode:
     def __init__(self):
@@ -21,7 +22,9 @@ class ExplorationNode:
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
 
-        self.map_data = None
+        self.frontier_pub = rospy.Publisher('/frontiers', MarkerArray, queue_size=10)
+
+        self.global_map_data = None
         self.robot_pose = None
 
         self.timer = rospy.Timer(rospy.Duration(3), self.goal_timer_callback)
@@ -29,27 +32,182 @@ class ExplorationNode:
         rospy.loginfo("Exploration node initialized")
 
     def map_callback(self, msg: OccupancyGrid):
-        self.map_data = msg
+        self.global_map_data = msg
 
     def odom_callback(self, msg: Odometry):
         self.robot_pose = msg.pose.pose
 
+    # def find_unexplored_areas(self):
+    #     if self.global_map_data is None:
+    #         rospy.logerr("Map data not available yet")
+    #         return None
+
+    #     data = np.array(self.global_map_data.data).reshape((self.global_map_data.info.height, self.global_map_data.info.width))
+    #     unexplored = np.where(data == -1)
+    #     unexplored_points = list(zip(unexplored[0], unexplored[1]))
+
+    #     return unexplored_points
+
     def find_unexplored_areas(self):
-        if self.map_data is None:
+        if self.global_map_data is None:
             rospy.logerr("Map data not available yet")
             return None
 
-        data = np.array(self.map_data.data).reshape((self.map_data.info.height, self.map_data.info.width))
-        unexplored = np.where(data == -1)
-        unexplored_points = list(zip(unexplored[0], unexplored[1]))
+        # Robot size (in meters) - adjust these values to match your robot
+        robot_radius = 0.3 # Radius of the waffle robot plus clearance doubled
 
+        # Map data and dimensions
+        width = self.global_map_data.info.width
+        height = self.global_map_data.info.height
+        global_map_data = np.array(self.global_map_data.data).reshape((height, width))
+        resolution = self.global_map_data.info.resolution  # Get resolution from the map data
+
+        # Calculate robot size and clearance in cells
+        robot_radius_cells = int(np.ceil(robot_radius / resolution))
+        robot_cells_range = range(-int(robot_radius_cells), int(robot_radius_cells))
+        rospy.logwarn(f"robot_radius cells: {robot_radius_cells}\nrobot_radius range: {robot_cells_range}")
+
+        # Occupancy threshold for unexplored areas (0-100)
+        unexplored_count = 0
+        bound_breaks = 0
+        occupied_breaks = 0
+        
+        unexplored_points = []
+        for y in range(height):
+            for x in range(width):
+                if global_map_data[y][x] == -1:  # Check cell is uknown
+                    # Check if area around this point is unexplored
+                    unexplored_count += 1
+                    is_valid_area = True
+                    for dx in robot_cells_range:
+                        for dy in robot_cells_range:
+                            nx, ny = x + dx, y + dy
+                            if not (0 <= nx < width and 0 <= ny < height):
+                                is_valid_area = False  # Out of bounds
+                                bound_breaks += 1
+                                break
+                            elif global_map_data[ny][nx] != -1:  
+                                is_valid_area = False  # Not occupied
+                                occupied_breaks += 1
+                                break
+                        if not is_valid_area:
+                            break
+
+                    if is_valid_area:
+                        unexplored_points.append((y, x))
+        rospy.logerr(f"found {len(unexplored_points)} out of {unexplored_count}")
+        rospy.logerr(f"Bound b {bound_breaks}, Occ B {occupied_breaks}")
         return unexplored_points
 
 
+    def find_frontiers(self):
+        rospy.logerr("finding frontiers....")
+        if self.global_map_data is None:
+            rospy.logerr("Map data not available yet")
+            return None
+
+        # Get map data and dimensions
+        width = self.global_map_data.info.width
+        height = self.global_map_data.info.height
+        global_map_data = np.array(self.global_map_data.data).reshape((height, width))
+
+        # Find potential frontier cells
+        frontiers = []
+        for y in range(1, height - 1):
+            for x in range(1, width - 1):
+                if global_map_data[y][x] == -1:
+                    neighbors = [
+                        global_map_data[y - 1][x],
+                        global_map_data[y + 1][x],
+                        global_map_data[y][x - 1],
+                        global_map_data[y][x + 1],
+                    ]
+                    if 0 in neighbors:
+                        frontiers.append((y, x))
+
+        # Cluster frontier cells into groups
+        frontier_groups = []
+        visited = set()
+        for y, x in frontiers:
+            if (y, x) not in visited:
+                group = self.flood_fill(global_map_data, y, x, visited)
+                frontier_groups.append(group)
+
+        # Filter out small frontier groups (optional)
+        min_group_size = 5  
+        frontier_groups = [group for group in frontier_groups if len(group) >= min_group_size]
+
+        # Convert frontiers to map coordinates
+        frontiers_map_coords = []
+        for group in frontier_groups:
+            group_x, group_y = zip(*group)
+            centroid_x = np.mean(group_x) * self.global_map_data.info.resolution + self.global_map_data.info.origin.position.x
+            centroid_y = np.mean(group_y) * self.global_map_data.info.resolution + self.global_map_data.info.origin.position.y
+            frontiers_map_coords.append((centroid_y, centroid_x))
+        
+        rospy.logerr(frontiers_map_coords)
+        return frontiers_map_coords
 
 
-    def select_goal(self, unexplored_points):
-        if not unexplored_points or self.robot_pose is None:
+    def show_coords(self, coords):
+        # Publish a marker for a list of coordinates
+        marker_array = MarkerArray()
+        for i, (x, y) in enumerate(coords):
+            try:
+                marker = self.create_marker(x, y, i)
+            except Exception as e:
+                rospy.logerr(f"Error in creating_marker: {e}")
+
+            marker_array.markers.append(marker)
+        self.frontier_pub.publish(marker_array)
+        rospy.logwarn("published marker array")
+
+
+    def create_marker(self, x, y, id): 
+        # Return a marker at a given coordinate
+        marker = Marker()
+        marker.header.frame_id = "map"  # Frame of the map
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = "frontiers"
+        marker.id = id
+        marker.type = Marker.CUBE  # or Marker.SPHERE, Marker.CYLINDER, etc.
+        marker.action = Marker.ADD
+        marker.pose.position.x = x # * self.global_map_data.info.resolution + self.global_map_data.info.origin.position.x
+        marker.pose.position.y = y # * self.global_map_data.info.resolution + self.global_map_data.info.origin.position.y
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = self.global_map_data.info.resolution * 3
+        marker.scale.y = self.global_map_data.info.resolution * 3
+        marker.scale.z = 0.1  # Adjust for visualization
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.lifetime = rospy.Duration(5.0)
+        rospy.logwarn(f"made marker id: {id}")
+        return marker
+
+
+    def flood_fill(self, global_map_data, y, x, visited):
+        group = []
+        queue = [(y, x)]
+        visited.add((y, x))
+
+        while queue:
+            current_y, current_x = queue.pop(0)
+            group.append((current_y, current_x))
+            for dy, dx in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                neighbor_y, neighbor_x = current_y + dy, current_x + dx
+                if 0 <= neighbor_y < self.global_map_data.info.height and \
+                0 <= neighbor_x < self.global_map_data.info.width and \
+                global_map_data[neighbor_y][neighbor_x] == -1 and \
+                (neighbor_y, neighbor_x) not in visited:
+                    queue.append((neighbor_y, neighbor_x))
+                    visited.add((neighbor_y, neighbor_x))
+        return group
+
+
+    def select_goal(self, potential_goals):
+        if not potential_goals or self.robot_pose is None:
             rospy.logerr("No unexplored points or robot pose available")
             return None
 
@@ -62,9 +220,9 @@ class ExplorationNode:
         min_distance = float('inf')
         angle_lim = np.pi / 2
 
-        for (y, x) in unexplored_points:
-            map_x = x * self.map_data.info.resolution + self.map_data.info.origin.position.x
-            map_y = y * self.map_data.info.resolution + self.map_data.info.origin.position.y
+        for (y, x) in potential_goals:
+            map_x = x * self.global_map_data.info.resolution + self.global_map_data.info.origin.position.x
+            map_y = y * self.global_map_data.info.resolution + self.global_map_data.info.origin.position.y
             distance = np.sqrt((map_x - robot_x) ** 2 + (map_y - robot_y) ** 2)
             direction = np.arctan2(map_y - robot_y, map_x - robot_x)
             angle_diff = abs(direction - robot_yaw)
@@ -72,9 +230,13 @@ class ExplorationNode:
             if distance < min_distance and angle_diff < angle_lim:
                 min_distance = distance
                 selected_goal = (map_x, map_y)
-
         rospy.logwarn(f"Selected goal: {selected_goal}")
+        try:
+            self.show_coords([selected_goal])
+        except Exception as e:
+            rospy.logerr(f"Error in show_coords: {e}")
         return selected_goal
+
 
     def send_goal(self, goal_coords):
         if goal_coords is None:
@@ -88,8 +250,7 @@ class ExplorationNode:
 
         self.move_base_client.send_goal(new_goal_msg, done_cb=self.goal_done_callback, feedback_cb=self.goal_feedback)
 
-        # self.goal_pub.publish(goal_msg)
-        rospy.loginfo(f"New goal set at: x={goal_coords[0]}, y={goal_coords[1]}")
+        rospy.logerr(f"New goal set at: x={goal_coords[0]}, y={goal_coords[1]}")
 
 
     def goal_feedback(self, feedback):
@@ -101,7 +262,7 @@ class ExplorationNode:
     def goal_done_callback(self, state, result):
         # Callback function to be executed when the goal is done (reached or aborted)
         if state == GoalStatus.SUCCEEDED:
-            rospy.loginfo("Goal RESULT:", result)
+            rospy.loginfo(f"Goal RESULT: {result}")
         else:
             rospy.logwarn("Goal aborted")
 
@@ -109,9 +270,9 @@ class ExplorationNode:
     def goal_timer_callback(self, event):
         try:
             unexplored_points = self.find_unexplored_areas()
-            # rospy.loginfo(f"Unexplored points: {unexplored_points}")
+            # frontier_points = self.find_frontiers()
             goal = self.select_goal(unexplored_points)
-            rospy.loginfo(f"Selected goal: {goal}")
+            rospy.logerr(f"Selected goal: {goal}")
             self.send_goal(goal)
         except Exception as e:
             rospy.logerr(f"Error in goal_timer_callback: {e}")
