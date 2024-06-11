@@ -3,7 +3,7 @@ import rospy
 import numpy as np
 from tf.transformations import euler_from_quaternion
 from windows import SearchWindow, CellWindow
-from ros_parameters import MAP_HEIGHT, MAP_RESOLUTION, MAP_WIDTH, ROBOT_RADIUS
+from ros_parameters import MAP_HEIGHT, MAP_RESOLUTION, MAP_WIDTH, ROBOT_RADIUS, MAP_ORIGIN
 
 
 class GoalSelector:
@@ -35,23 +35,16 @@ class GoalSelector:
         
         # Find Robot diameter in terms of cells to be used as size for CellWindow
         robot_diameter = 2 * int(np.ceil((ROBOT_RADIUS + self.clearance) / MAP_RESOLUTION))
+        rospy.loginfo(f"CELL WINDOW SIZE: {robot_diameter}")
 
         for cell in unexplored_cells:
             x_global, y_global = cell
             cell_window = CellWindow(robot_diameter, x_global, y_global)
             if cell_window.is_unexplored(self.map_2D_array):
-                explorable_locations.append(self.cell_to_meters(cell))
-        rospy.loginfo(f"{len(explorable_locations)} locations")
+                explorable_locations.append(self.indices_to_meters(cell))
+        # rospy.loginfo(f"{unexplored_cells[0]} becomes: {explorable_locations[0]} location")
         return explorable_locations
 
-
-    def cell_to_meters(self, cell):
-        """Converts a cell thats in global indices to global meters"""
-        # Convert target coordinates to global meters
-        target_x_index, target_y_index = cell
-        target_x_meters = (target_x_index + 0.5) * MAP_RESOLUTION
-        target_y_meters = (target_y_index + 0.5) * MAP_RESOLUTION
-        return (target_x_meters, target_y_meters)
 
     def _distance_to_robot(self, location):
         """Helper function to calculate distance to the robot (in cells)"""
@@ -72,14 +65,12 @@ class GoalSelector:
             rospy.logwarn("No possible locations found.")
             return None  # Handle the case where there are no locations
 
-        # Find the index of the closest location
-        closest_location_index = min(range(len(self.possible_locations)),
+        # Find the index of the furtherest location
+        target_location_index = max(range(len(self.possible_locations)),
                                 key=lambda i: self._distance_to_robot(self.possible_locations[i]))
 
         # Get the location coordinates in map indices
-        goal = self.possible_locations[closest_location_index]
-        rospy.loginfo(f"Goal selected: {goal}")
-
+        goal = self.possible_locations[target_location_index]
         return goal
 
 
@@ -87,7 +78,7 @@ class GoalSelector:
         """Finds a goal location in the costmap by searching radially outwards from the robot."""
         rospy.loginfo("Updating possible locations...")
         while self.search_window.size <= min(MAP_WIDTH, MAP_HEIGHT):
-            unexplored_cells = self.search_window.get_unexplored_contents(self.map_2D_array) # relative to global frame
+            unexplored_cells = self.search_window.get_unexplored_cells_global(self.map_2D_array) # relative to global frame
             possible_locations = self.get_target_locations_in_window(unexplored_cells)
             
             if len(possible_locations) > 0:
@@ -98,14 +89,26 @@ class GoalSelector:
                 rospy.logwarn("No unexplored areas found within the search window. Expanding...")
                 self.search_window.expand_window(self.expansion_factor)
 
-        rospy.logerr("No valid goal found within the entire map!")
+        rospy.logerr(f"No valid goal found within the entire map! SWS:{self.search_window.size}, {MAP_WIDTH}, {MAP_HEIGHT}")
 
 
-    def get_robot_pose_indices(self, odom_pose):
-        """Converts robot pose to map indices."""
-        x_idx = int(odom_pose.position.x / MAP_RESOLUTION)
-        y_idx = int(odom_pose.position.y / MAP_RESOLUTION)
-        rospy.loginfo(f"Robot pose indices: x={x_idx}, y={y_idx}")
+    def indices_to_meters(self, cell):
+        """Converts a cell thats in global indices to global meters"""
+        # Convert target coordinates to global meters
+        target_x_index, target_y_index = cell
+        origin_x, origin_y = MAP_ORIGIN
+        target_x_meters = (target_x_index + 0.5) * MAP_RESOLUTION + origin_x
+        target_y_meters = (target_y_index + 0.5) * MAP_RESOLUTION + origin_y
+        return (target_x_meters, target_y_meters)
+    
+
+    def meters_to_indices(self, coord):
+        """Converts coordinat in meters to map indices."""
+        map_origin_x, map_origin_y = MAP_ORIGIN
+        x_meters, y_meters = coord
+        x_idx = int((x_meters - map_origin_x)/ MAP_RESOLUTION)
+        y_idx = int((y_meters - map_origin_y)/ MAP_RESOLUTION)
+        rospy.loginfo(f"Robot position: x={x_meters}, y={y_meters}\nRobot pose indices: x={x_idx}, y={y_idx}")
         return x_idx, y_idx
     
     
@@ -119,11 +122,15 @@ class GoalSelector:
         self.search_window.shift_window(shift_x, shift_y)
         rospy.loginfo(f"Search window center after shift: x={self.search_window.center_x}, y={self.search_window.center_y}")
 
+
     def update_goal_selector(self, map_msg, odom_pose):
         rospy.loginfo("Updating goal selector...")
+        rospy.loginfo(f"MAP INFO: {map_msg.info} ")
+        rospy.loginfo(f"ODOM POSE: {odom_pose}")
         self.map_2D_array = np.array(map_msg.data).reshape(map_msg.info.height, map_msg.info.width)
-        rospy.loginfo(f"Map 2D array shape: {self.map_2D_array.shape}")
-        self.robot_index_x, self.robot_index_y = self.get_robot_pose_indices(odom_pose)
+        odom_coord = (odom_pose.position.x, odom_pose.position.y)
+        self.robot_index_x, self.robot_index_y = self.meters_to_indices(odom_coord)
+        
         self.search_window = SearchWindow(self.initial_window_size, self.robot_index_x, self.robot_index_y)
         robot_yaw = euler_from_quaternion([odom_pose.orientation.x, odom_pose.orientation.y, odom_pose.orientation.z, odom_pose.orientation.w])[2]
         self.shift_window_in_yaw_direction(robot_yaw)

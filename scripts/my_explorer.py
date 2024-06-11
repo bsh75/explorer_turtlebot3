@@ -19,7 +19,7 @@ class ExplorationNode:
         rospy.init_node('exploration_node', anonymous=True)
 
         # Goal Selector and State Controller Instances
-        self.goal_selector = GoalSelector(initial_window_size=10, expansion_factor=1.2, clearance=0.1)
+        self.goal_selector = GoalSelector(initial_window_size=30, expansion_factor=1.2, clearance=0.1)
         # self.state_controller = StateController()
 
         # ROS Publishers and Action Client
@@ -32,6 +32,9 @@ class ExplorationNode:
         odom_sub = Subscriber("/odom", Odometry)
         ats = ApproximateTimeSynchronizer([map_sub, odom_sub], queue_size=10, slop=0.5)
         ats.registerCallback(self.sync_callback)
+
+        # Callback rate
+        self.rync_callback_rate = rospy.Rate(2)
 
         # Goal Message (for move_base)
         self.global_goal_msg = MoveBaseGoal()
@@ -46,8 +49,12 @@ class ExplorationNode:
         if goal:
             self.set_goal(goal)
             self.publish_goal()
+            self.marker_array.markers.clear()  # Clear previous markers
+            self.add_coord_markers(self.goal_selector.possible_locations)
+            self.add_coord_markers([goal])
         else:
             rospy.logwarn("Goal not found...")
+        self.rync_callback_rate.sleep()
 
     def set_goal(self, goal):
         """Sets the goal for move_base."""
@@ -58,7 +65,6 @@ class ExplorationNode:
     def add_coord_markers(self, coords, size=1, shape=Marker.CUBE):
         """Publish a marker for a list of coordinates."""
         try:
-            self.marker_array.markers.clear()  # Clear previous markers
             for i, (x, y) in enumerate(coords):
                 marker = self.create_marker(x, y, i + 1, size * MAP_RESOLUTION, shape)
                 self.marker_array.markers.append(marker)
