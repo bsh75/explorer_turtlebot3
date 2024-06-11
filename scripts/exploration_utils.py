@@ -37,9 +37,29 @@ def cell_to_map_coordinates(row, col, min_row, min_col, resolution, origin_posit
 
 
 def cell_is_big_enough(search_grid, row, col, robot_radius_cells):
-    """Check if the cell is part of a sufficiently large unexplored area."""
-    # Placeholder for actual implementation
-    return True  # Replace with actual check
+    """
+    Checks if a cell is part of an unexplored area large enough for the robot.
+
+    Args:
+        search_grid: 2D NumPy array representing the search area of the costmap.
+        row: Row index of the cell.
+        col: Column index of the cell.
+        robot_radius_cells: Robot's radius in cells.
+
+    Returns:
+        True if the cell is part of a sufficiently large unexplored area, False otherwise.
+    """
+    # Ensure the robot's radius doesn't cause us to go out of bounds
+    row_start = max(0, row - robot_radius_cells)
+    row_end = min(search_grid.shape[0] - 1, row + robot_radius_cells)
+    col_start = max(0, col - robot_radius_cells)
+    col_end = min(search_grid.shape[1] - 1, col + robot_radius_cells)
+
+    # Extract the region around the cell
+    region = search_grid[row_start:row_end + 1, col_start:col_end + 1]
+
+    # Check if all cells in the region are unexplored (-1)
+    return np.all(region == -1) 
 
 
 def get_robot_indices(robot_x, robot_y, origin_position, resolution):

@@ -9,43 +9,42 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import GoalStatusArray, GoalStatus
 import actionlib
 from visualization_msgs.msg import Marker, MarkerArray
-from functions import *
+from message_filters import ApproximateTimeSynchronizer, Subscriber # add imports
 
+# ---- ExplorationNode Class ----
+# ---- Helper Functions (Moved to separate module: exploration_utils.py) ----
+#  (find_unexplored_areas, cell_is_big_enough, get_robot_indices, adjust_center, calculate_search_boundaries)
+from exploration_utils import find_unexplored_areas, get_robot_indices, adjust_center, calculate_search_boundaries
 # ---- ExplorationNode Class ----
 
 class ExplorationNode:
-
     def __init__(self):
         rospy.init_node('exploration_node', anonymous=True)
-
-        # Initialize action client for move_base
-        self.move_base_client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
-        rospy.loginfo("Waiting for move_base action server...")
-        self.move_base_client.wait_for_server()
-
-        self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
-
-        self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
-
-        self.marker_pub = rospy.Publisher('/frontiers', MarkerArray, queue_size=100)
-
         self.global_map_data = None
+        self.robot_pose = None
 
+        # Action Client
+        self.move_base_client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
+        self.move_base_client.wait_for_server()
         self.global_goal_msg = MoveBaseGoal()
         self.global_goal_msg.target_pose.header.frame_id = "map"
-        self.global_goal_msg.target_pose.pose.orientation.w = 1.0 
+        self.global_goal_msg.target_pose.pose.orientation.w = 1.0
 
-        self.robot_pose = None
+        # Publishers and Subscribers
+        self.marker_pub = rospy.Publisher('/frontiers', MarkerArray, queue_size=100)
+        map_sub = Subscriber("/map", OccupancyGrid)
+        odom_sub = Subscriber("/odom", Odometry)
+        
+        # Message Filter for Synchronization
+        ats = ApproximateTimeSynchronizer([map_sub, odom_sub], queue_size=10, slop=0.5)
+        ats.registerCallback(self.sync_callback)
 
         # self.timer = rospy.Timer(rospy.Duration(3), self.goal_timer_callback)
 
-    def map_callback(self, msg: OccupancyGrid):
-        self.global_map_data = msg
-        self.find_goal()
-
-
-    def odom_callback(self, msg: Odometry):
-        self.robot_pose = msg.pose.pose
+    def sync_callback(self, map_msg: OccupancyGrid, odom_msg: Odometry):
+        self.global_map_data = map_msg
+        self.robot_pose = odom_msg.pose.pose
+        self.find_goal()    
 
 
     def find_goal(self):
@@ -55,7 +54,7 @@ class ExplorationNode:
         resolution = costmap.info.resolution
 
         search_size_cells = int(1 / resolution)
-        expansion_factor = 2
+        expansion_factor = 1.2
         robot_x, robot_y, robot_yaw = self.get_robot_position_and_yaw()
         robot_radius_cells = int(np.ceil(0.3 / resolution))
 
@@ -68,13 +67,14 @@ class ExplorationNode:
 
             unexplored_areas = find_unexplored_areas(costmap_data, resolution, costmap.info.origin.position, min_row, max_row, min_col, max_col, robot_radius_cells)
             
-            self.marker_array = MarkerArray() # Reset the marker array
-            self.add_coord_markers(unexplored_areas, size=1, shape=Marker.CUBE)
+            # Reset the marker 
+            self.marker_array = MarkerArray()
+            self.marker_pub.publish(self.marker_array)
 
-            rospy.logwarn(f"{len(unexplored_areas)} possible goals eg: {unexplored_areas[0] if unexplored_areas else 'None'}")
-
+        
             if unexplored_areas:
-                goal = min(unexplored_areas, key=self._distance_to_robot)
+                self.add_coord_markers(unexplored_areas, size=1, shape=Marker.CUBE)
+                goal = max(unexplored_areas, key=self._distance_to_robot)
                 if goal not in unexplored_areas:
                     rospy.logerr(f"{goal} isnt one of options")
                 
@@ -89,7 +89,7 @@ class ExplorationNode:
             else:
                 rospy.logwarn("No unexplored areas found within the search window. Expanding...")
 
-            search_size_cells *= expansion_factor
+            search_size_cells = int(search_size_cells * expansion_factor)
             half_size_cells = search_size_cells // 2
 
         rospy.logerr("No valid goal found within the entire map!")
@@ -110,6 +110,7 @@ class ExplorationNode:
         """Helper function to calculate Euclidean distance to the robot."""
         return np.sqrt((location[0] - self.robot_pose.position.x) ** 2 +
                        (location[1] - self.robot_pose.position.y) ** 2)
+
 
     def add_coord_markers(self, coords, size=1, shape=Marker.CUBE):
         try:
