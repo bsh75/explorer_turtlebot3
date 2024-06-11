@@ -10,108 +10,39 @@ from actionlib_msgs.msg import GoalStatusArray, GoalStatus
 import actionlib
 from visualization_msgs.msg import Marker, MarkerArray
 from message_filters import ApproximateTimeSynchronizer, Subscriber # add imports
+from goal_selecter import GoalSelector
+# from state_controller import StateController
 
-# ---- ExplorationNode Class ----
-# ---- Helper Functions (Moved to separate module: exploration_utils.py) ----
-#  (find_unexplored_areas, cell_is_big_enough, get_robot_indices, adjust_center, calculate_search_boundaries)
-from exploration_utils import find_unexplored_areas, get_robot_indices, adjust_center, calculate_search_boundaries
-# ---- ExplorationNode Class ----
 
 class ExplorationNode:
     def __init__(self):
         rospy.init_node('exploration_node', anonymous=True)
-        self.global_map_data = None
-        self.robot_pose = None
 
-        # Action Client
+        # Goal Selector and State Controller Instances
+        self.goal_selector = GoalSelector(initial_window_size=10, expansion_factor=1.2, clearance=0.1)
+        # self.state_controller = StateController()
+
+        # ROS Publishers and Action Client
+        self.marker_pub = rospy.Publisher('/frontiers', MarkerArray, queue_size=100)
         self.move_base_client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
         self.move_base_client.wait_for_server()
-        self.global_goal_msg = MoveBaseGoal()
-        self.global_goal_msg.target_pose.header.frame_id = "map"
-        self.global_goal_msg.target_pose.pose.orientation.w = 1.0
-
-        # Publishers and Subscribers
-        self.marker_pub = rospy.Publisher('/frontiers', MarkerArray, queue_size=100)
+        
+        # Initialize the subscribers with message_filters
         map_sub = Subscriber("/map", OccupancyGrid)
         odom_sub = Subscriber("/odom", Odometry)
-        
-        # Message Filter for Synchronization
         ats = ApproximateTimeSynchronizer([map_sub, odom_sub], queue_size=10, slop=0.5)
         ats.registerCallback(self.sync_callback)
 
-        # self.timer = rospy.Timer(rospy.Duration(3), self.goal_timer_callback)
+        # Goal Message (for move_base)
+        self.global_goal_msg = MoveBaseGoal()
+        self.global_goal_msg.target_pose.header.frame_id = "map"
+        self.global_goal_msg.target_pose.pose.orientation.w = 1.0 
+
 
     def sync_callback(self, map_msg: OccupancyGrid, odom_msg: Odometry):
-        self.global_map_data = map_msg
-        self.robot_pose = odom_msg.pose.pose
-        self.find_goal()    
+        goal = self.goal_selector.select_goal(map_msg, odom_msg.pose.pose)
 
-
-    def find_goal(self):
-        """Finds a goal location in the costmap by searching radially outwards from the robot."""
-        costmap = self.global_map_data
-        costmap_data = np.array(costmap.data).reshape(costmap.info.height, costmap.info.width)
-        resolution = costmap.info.resolution
-
-        search_size_cells = int(1 / resolution)
-        expansion_factor = 1.2
-        robot_x, robot_y, robot_yaw = self.get_robot_position_and_yaw()
-        robot_radius_cells = int(np.ceil(0.3 / resolution))
-
-        robot_x_idx, robot_y_idx = get_robot_indices(robot_x, robot_y, costmap.info.origin.position, resolution)
-        half_size_cells = search_size_cells // 2
-
-        while search_size_cells <= max(costmap.info.width, costmap.info.height):
-            center_x_idx, center_y_idx = adjust_center(robot_x_idx, robot_y_idx, half_size_cells, robot_yaw)
-            min_row, max_row, min_col, max_col = calculate_search_boundaries(center_x_idx, center_y_idx, half_size_cells, costmap.info.height, costmap.info.width)
-
-            unexplored_areas = find_unexplored_areas(costmap_data, resolution, costmap.info.origin.position, min_row, max_row, min_col, max_col, robot_radius_cells)
-            
-            # Reset the marker 
-            self.marker_array = MarkerArray()
-            self.marker_pub.publish(self.marker_array)
-
-        
-            if unexplored_areas:
-                self.add_coord_markers(unexplored_areas, size=1, shape=Marker.CUBE)
-                goal = max(unexplored_areas, key=self._distance_to_robot)
-                if goal not in unexplored_areas:
-                    rospy.logerr(f"{goal} isnt one of options")
-                
-                goal_x, goal_y = goal
-
-                self.add_coord_markers([goal], size=3, shape=Marker.SPHERE)
-                self.marker_pub.publish(self.marker_array)
-                self.global_goal_msg.target_pose.pose.position.x = goal_x
-                self.global_goal_msg.target_pose.pose.position.y = goal_y
-                self.publish_goal()
-                return None # Leave function
-            else:
-                rospy.logwarn("No unexplored areas found within the search window. Expanding...")
-
-            search_size_cells = int(search_size_cells * expansion_factor)
-            half_size_cells = search_size_cells // 2
-
-        rospy.logerr("No valid goal found within the entire map!")
     
-
-    def get_robot_position_and_yaw(self):
-        """Retrieve robot's current position and yaw."""
-        robot_x = self.robot_pose.position.x
-        robot_y = self.robot_pose.position.y
-        robot_yaw = euler_from_quaternion([
-            self.robot_pose.orientation.x, self.robot_pose.orientation.y,
-            self.robot_pose.orientation.z, self.robot_pose.orientation.w
-        ])[2]
-        return robot_x, robot_y, robot_yaw
-    
-
-    def _distance_to_robot(self, location):
-        """Helper function to calculate Euclidean distance to the robot."""
-        return np.sqrt((location[0] - self.robot_pose.position.x) ** 2 +
-                       (location[1] - self.robot_pose.position.y) ** 2)
-
-
     def add_coord_markers(self, coords, size=1, shape=Marker.CUBE):
         try:
             # Publish a marker for a list of coordinates
@@ -162,7 +93,7 @@ class ExplorationNode:
         # Call back function executed when goal is set
         # rospy.loginfo(f"----Timer: {self.timer}")
         pass
-
+    
 
     def goal_done_callback(self, state, result):
         # Callback function to be executed when the goal is done (reached or aborted)
