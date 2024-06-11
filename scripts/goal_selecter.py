@@ -46,30 +46,42 @@ class GoalSelector:
         return explorable_locations
 
 
-    def _distance_to_robot(self, location):
-        """Helper function to calculate distance to the robot (in cells)"""
+    def distance_to_robot(self, location):
+        """Helper function to calculate distance to the robot (m)"""
         return np.sqrt((location[0] - self.robot_index_x) ** 2 +
                        (location[1] - self.robot_index_y) ** 2)
 
 
     def select_goal(self, map_msg, odom_pose):
-        """Selects the closest location from possible_locations based on distance.
-
-        Returns:
-            The coordinates (x, y) of the goal, or None if no locations exist.
-        """
+        """Selects the location furthest in the direction the robot is facing."""
         rospy.loginfo("Selecting goal...")
         self.update_goal_selector(map_msg, odom_pose)
 
         if not self.possible_locations:
             rospy.logwarn("No possible locations found.")
-            return None  # Handle the case where there are no locations
+            return None
 
-        # Find the index of the furtherest location
-        target_location_index = max(range(len(self.possible_locations)),
-                                key=lambda i: self._distance_to_robot(self.possible_locations[i]))
+        # Get robot's orientation in the map frame
+        robot_yaw = euler_from_quaternion([odom_pose.orientation.x, odom_pose.orientation.y,
+                                        odom_pose.orientation.z, odom_pose.orientation.w])[2]
 
-        # Get the location coordinates in map indices
+        def goal_score(location):
+            """Calculates a score for each location based on distance and alignment with yaw."""
+            distance = self.distance_to_robot(location)  
+            
+            # Calculate angle to location and difference from robot's yaw
+            dx = location[0] - self.robot_index_x
+            dy = location[1] - self.robot_index_y
+            angle_to_location = np.arctan2(dy, dx)
+            angle_diff = abs(robot_yaw - angle_to_location)
+            angle_diff = min(angle_diff, 2*np.pi - angle_diff)  # Normalize to [0, pi]
+
+            # Weight distance and angle difference
+            return distance - 0.2 * angle_diff  # Adjust weights as needed
+
+        # Find the index of the location with the highest score (furthest in yaw direction)
+        target_location_index = max(range(len(self.possible_locations)), key=lambda i: goal_score(self.possible_locations[i]))
+
         goal = self.possible_locations[target_location_index]
         return goal
 
