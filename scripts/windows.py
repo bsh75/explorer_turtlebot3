@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 import numpy as np
-from ros_parameters import MAP_HEIGHT, MAP_WIDTH, MAP_ORIGIN, MAP_RESOLUTION
 from nav_msgs.msg import OccupancyGrid, Odometry
 import rospy
 
 class Window:
-    def __init__(self, size, center_x, center_y):
+    def __init__(self, size, center_x, center_y, global_map_size):
         """Size is number of cells across x or y (square)
             Centers are indexs relative to global frame"""
-
         self.size = size
         self.center_x = center_x
         self.center_y = center_y
+        self.global_map_width, self.global_map_height = global_map_size
 
     def get_window_ranges(self):
         """Finds the min and max x and y indices of the window (capped by global map)."""
         min_ix = int(max(0, self.center_x - self.size // 2))
-        max_ix = int(min(MAP_WIDTH - 1, self.center_x + self.size // 2))
+        max_ix = int(min(self.global_map_width - 1, self.center_x + self.size // 2))
         min_iy = int(max(0, self.center_y - self.size // 2))
-        max_iy = int(min(MAP_HEIGHT -1, self.center_y + self.size // 2))
+        max_iy = int(min(self.global_map_height -1, self.center_y + self.size // 2))
         return min_ix, max_ix, min_iy, max_iy
 
     def get_window_contents(self, global_map):

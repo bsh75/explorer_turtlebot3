@@ -11,15 +11,17 @@ from message_filters import ApproximateTimeSynchronizer, Subscriber
 from goal_selecter import GoalSelector
 # from state_controller import StateController
 
-from ros_parameters import MAP_RESOLUTION
+from ros_parameters import RosParameters
 
 
 class ExplorationNode:
     def __init__(self):
         rospy.init_node('exploration_node', anonymous=True)
-
+        # ROS parameters from file
+        self.ros_params = RosParameters()
+        
         # Goal Selector and State Controller Instances
-        self.goal_selector = GoalSelector(initial_window_size=30, expansion_factor=1.2, clearance=0.1)
+        self.goal_selector = GoalSelector(self.ros_params, initial_window_size=30, expansion_factor=1.2, clearance=0.1)
         # self.state_controller = StateController()
 
         # ROS Publishers and Action Client
@@ -44,6 +46,8 @@ class ExplorationNode:
         # Marker array initialization
         self.marker_array = MarkerArray()
 
+
+
     def sync_callback(self, map_msg: OccupancyGrid, odom_msg: Odometry):
         goal = self.goal_selector.select_goal(map_msg, odom_msg.pose.pose)
         if goal:
@@ -66,7 +70,7 @@ class ExplorationNode:
         """Publish a marker for a list of coordinates."""
         try:
             for i, (x, y) in enumerate(coords):
-                marker = self.create_marker(x, y, i + 1, size * MAP_RESOLUTION, shape)
+                marker = self.create_marker(x, y, i + 1, size * self.ros_params.map_resolution, shape)
                 self.marker_array.markers.append(marker)
             self.marker_pub.publish(self.marker_array)
         except Exception as e:
