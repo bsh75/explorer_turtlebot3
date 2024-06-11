@@ -3,15 +3,15 @@
 import rospy
 import numpy as np
 from nav_msgs.msg import OccupancyGrid, Odometry
-from geometry_msgs.msg import PoseStamped
-from tf.transformations import euler_from_quaternion
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from actionlib_msgs.msg import GoalStatusArray, GoalStatus
+from actionlib_msgs.msg import GoalStatus
 import actionlib
 from visualization_msgs.msg import Marker, MarkerArray
-from message_filters import ApproximateTimeSynchronizer, Subscriber # add imports
+from message_filters import ApproximateTimeSynchronizer, Subscriber
 from goal_selecter import GoalSelector
 # from state_controller import StateController
+
+from ros_parameters import MAP_RESOLUTION
 
 
 class ExplorationNode:
@@ -36,26 +36,35 @@ class ExplorationNode:
         # Goal Message (for move_base)
         self.global_goal_msg = MoveBaseGoal()
         self.global_goal_msg.target_pose.header.frame_id = "map"
-        self.global_goal_msg.target_pose.pose.orientation.w = 1.0 
+        self.global_goal_msg.target_pose.pose.orientation.w = 1.0
 
+        # Marker array initialization
+        self.marker_array = MarkerArray()
 
     def sync_callback(self, map_msg: OccupancyGrid, odom_msg: Odometry):
         goal = self.goal_selector.select_goal(map_msg, odom_msg.pose.pose)
+        if goal:
+            self.set_goal(goal)
+            self.publish_goal()
+        else:
+            rospy.logwarn("Goal not found...")
 
-    
+    def set_goal(self, goal):
+        """Sets the goal for move_base."""
+        self.global_goal_msg.target_pose.pose.position.x = goal[0]
+        self.global_goal_msg.target_pose.pose.position.y = goal[1]
+        self.global_goal_msg.target_pose.pose.orientation.w = 1.0
+
     def add_coord_markers(self, coords, size=1, shape=Marker.CUBE):
+        """Publish a marker for a list of coordinates."""
         try:
-            # Publish a marker for a list of coordinates
+            self.marker_array.markers.clear()  # Clear previous markers
             for i, (x, y) in enumerate(coords):
-                try:
-                    marker = self.create_marker(x, y, i+1, size*self.global_map_data.info.resolution, shape)
-                except Exception as e:
-                    rospy.logerr(f"Error in creating_marker: {e}")
-
+                marker = self.create_marker(x, y, i + 1, size * MAP_RESOLUTION, shape)
                 self.marker_array.markers.append(marker)
+            self.marker_pub.publish(self.marker_array)
         except Exception as e:
-            rospy.logerr(f"Markers wrong {e}")
-        
+            rospy.logerr(f"Error in adding markers: {e}")
 
     def create_marker(self, x, y, marker_id, size, shape):
         """Create a visualization marker."""
@@ -82,26 +91,22 @@ class ExplorationNode:
         marker.color.b = 0.0
         return marker
 
-
     def publish_goal(self):
+        """Send the goal to move_base."""
         self.global_goal_msg.target_pose.header.stamp = rospy.Time.now()
         self.move_base_client.send_goal(self.global_goal_msg, done_cb=self.goal_done_callback, feedback_cb=self.goal_feedback)
-        rospy.logwarn(f"New goal set: {self.global_goal_msg}")
-
+        rospy.loginfo(f"New goal set: {self.global_goal_msg.target_pose.pose.position.x}, {self.global_goal_msg.target_pose.pose.position.y}")
 
     def goal_feedback(self, feedback):
-        # Call back function executed when goal is set
-        # rospy.loginfo(f"----Timer: {self.timer}")
+        """Callback function executed when goal feedback is received."""
         pass
-    
 
     def goal_done_callback(self, state, result):
-        # Callback function to be executed when the goal is done (reached or aborted)
+        """Callback function executed when the goal is done (reached or aborted)."""
         if state == GoalStatus.SUCCEEDED:
-            rospy.loginfo(f"Goal RESULT: {result}")
+            rospy.loginfo("Goal reached successfully.")
         else:
-            rospy.logwarn("Goal aborted")
-
+            rospy.logwarn("Goal aborted or failed.")
 
 if __name__ == '__main__':
     try:
