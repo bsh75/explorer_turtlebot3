@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+
+"""
+windows.py: Utility classes for defining and manipulating windows (regions of interest) on a map.
+
+This module defines classes for representing and working with rectangular windows on a grid map. 
+These windows are used to focus the robot's exploration efforts and efficiently identify potential goal locations.
+"""
+
 import numpy as np
 import rospy
 
@@ -31,10 +39,10 @@ class Window:
         Returns:
             tuple: (min_col, max_col, min_row, max_row) in cell indices.
         """
-        min_col = max(0, self.center_x - self.size // 2)
-        max_col = min(self.map_width - 1, self.center_x + self.size // 2)
-        min_row = max(0, self.center_y - self.size // 2)
-        max_row = min(self.map_height - 1, self.center_y + self.size // 2)
+        min_col = int(max(0, self.center_x - self.size // 2))
+        max_col = int(min(self.map_width - 1, self.center_x + self.size // 2))
+        min_row = int(max(0, self.center_y - self.size // 2))
+        max_row = int(min(self.map_height - 1, self.center_y + self.size // 2))
         return min_col, max_col, min_row, max_row
 
     def get_window_contents(self, global_map):
@@ -76,7 +84,7 @@ class SearchWindow(Window):
         self.center_x += shift_x
         self.center_y += shift_y
 
-    def get_unexplored_cells_global(self, global_map):
+    def get_unoccupied_cells_in_window(self, global_map):
         """
         Finds unexplored cells (-1 values) within the window and returns their coordinates in the global map frame.
 
@@ -87,16 +95,16 @@ class SearchWindow(Window):
             list: A list of tuples representing the (x, y) coordinates (in meters) of unexplored cells.
         """
         window_contents = self.get_window_contents(global_map)
-        unexplored_cells = np.argwhere(window_contents == -1)
+        unoccupied_window_cells = np.argwhere(window_contents != 100)
         rospy.logwarn(f"Search window \nsize: {self.size}\nX: {self.center_x}, Y: {self.center_y}")
-        # Get origin offset from the map message
         
-        global_unexplored_cells = []
-        for (xi, yi) in unexplored_cells:
+        # Convert window contents back to global coordinate frame
+        unoccupied_cells_in_window = []
+        for (xi, yi) in unoccupied_window_cells:
             xi_global = (xi + (self.center_x - self.size//2))  # Add 0.5 for cell center
             yi_global = (yi + (self.center_y - self.size//2))  # Add 0.5 for cell center
-            global_unexplored_cells.append((xi_global, yi_global))
-        return global_unexplored_cells
+            unoccupied_cells_in_window.append((xi_global, yi_global))
+        return unoccupied_cells_in_window
 
 
 class CellWindow(Window):
@@ -115,3 +123,16 @@ class CellWindow(Window):
             bool: True if all cells are unexplored, False otherwise.
         """
         return np.all(self.get_window_contents(global_map) == -1)
+    
+
+    def is_unoccupied(self, global_map):
+        """
+        Checks if all cells within this window (including the center cell) are unoccupied (not 100).
+
+        Args:
+            global_map (numpy.ndarray): The occupancy grid map as a 2D NumPy array.
+
+        Returns:
+            bool: True if all cells are unexplored, False otherwise.
+        """
+        return np.all(self.get_window_contents(global_map) < 70)

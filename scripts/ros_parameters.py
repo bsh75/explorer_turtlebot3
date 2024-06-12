@@ -1,3 +1,10 @@
+"""
+ros_parameters.py: ROS parameter loader and manager for robotic exploration.
+
+This module handles loading and accessing ROS parameters necessary for the robot's exploration behavior. 
+It provides a convenient way to centralize parameter management and ensure consistent access across different parts of the exploration node.
+"""
+
 import rospy
 import yaml
 import numpy as np
@@ -17,6 +24,7 @@ class RosParameters:
         footprint_file = f'costmap_common_params_{self.robot_type}.yaml'
         footprint_params = self.load_yaml('explorer_turtlebot3', footprint_file)
         self.robot_radius = np.max(np.abs(np.array(footprint_params['footprint']).flatten()))
+        self.robot_diameter_cells = 2 * int(np.ceil((self.robot_radius) / self.map_resolution))
 
     def load_yaml(self, package_name, file_name):
         """Loads parameters from a YAML file in a ROS package."""

@@ -1,3 +1,11 @@
+"""
+visualization.py: Visualization tools for displaying markers in RViz.
+
+This module provides classes for creating and publishing custom markers in RViz to visualize exploration goals,
+potential frontiers, and other relevant information for the robot's exploration process.
+"""
+
+
 from visualization_msgs.msg import Marker, MarkerArray
 import rospy
 

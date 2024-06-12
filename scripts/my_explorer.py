@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 
+"""
+my_explorer.py: ROS node for frontier-based autonomous exploration.
+
+This is the main ROS node that orchestrates the exploration process. 
+It subscribes to map and odometry topics, uses the `GoalSelector` to determine goal locations, 
+publishes markers to visualize exploration progress, 
+and sends navigation goals to the `move_base` action server.
+"""
+
 import rospy
 import numpy as np
 from nav_msgs.msg import OccupancyGrid, Odometry
@@ -19,7 +28,7 @@ class ExplorationNode:
         # Parameters
         self.ros_params = RosParameters()
         self.goal_selector = GoalSelector(
-            self.ros_params, initial_window_size=100, expansion_factor=1.2, clearance=0.1
+            self.ros_params, initial_window_size=50, expansion_factor=2, clearance=0.1
         )
         self.publish_rate = rospy.Rate(1)  # Hz (Goals published per second)
 
@@ -37,15 +46,15 @@ class ExplorationNode:
         ts.registerCallback(self.sync_callback)
 
 
-    def sync_callback(self, map_msg, odom_msg):
-        goal = self.goal_selector.select_goal(map_msg, odom_msg.pose.pose)
-        if goal:
+    def sync_callback(self, map_msg, odom_msg: Odometry):
+        goal = self.goal_selector.get_goal(map_msg, odom_msg.pose.pose)
+        if (goal):
             self.set_goal(goal)
             self.publish_goal()
             self.set_displays(goal)
         else:
             rospy.logwarn("Goal not found...")
-        self.publish_rate.sleep()
+        # self.publish_rate.sleep()
 
 
     def set_goal(self, goal):
@@ -55,6 +64,7 @@ class ExplorationNode:
 
 
     def publish_goal(self):
+        """Separate function for better state"""
         self.global_goal_msg.target_pose.header.stamp = rospy.Time.now()
         self.move_base_client.send_goal(self.global_goal_msg, 
                                         done_cb=self.goal_done_callback,
@@ -74,7 +84,7 @@ class ExplorationNode:
             rospy.logwarn("Goal aborted or failed.")
 
     def set_displays(self, goal):
-        small_displays = self.goal_selector.possible_locations
+        small_displays = self.goal_selector.coords_in_window
         resolution = self.ros_params.map_resolution
         markers = GoalMarkerArray()
         markers.display(small_displays, goal, resolution, duration=1.0)    

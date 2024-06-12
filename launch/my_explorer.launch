@@ -6,8 +6,8 @@
   <env name="TURTLEBOT3_MODEL" value="$(arg model)"/>
   
   <!-- Include TurtleBot3 Gazebo launch file -->
-  <!-- <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_world.launch">
-  </include> -->
+  <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_world.launch">
+  </include>
 
   <!-- Include gmapping launch file with customised rvis configuration -->
   <include file="$(find explorer_turtlebot3)/launch/my_turtlebot3_slam.launch">
