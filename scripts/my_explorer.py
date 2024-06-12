@@ -9,7 +9,7 @@ import actionlib
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 from goal_selecter import GoalSelector
 from ros_parameters import RosParameters
-from visualization import MarkerArrayDisplay
+from visualization import GoalMarkerArray
 
 
 class ExplorationNode:
@@ -19,7 +19,7 @@ class ExplorationNode:
         # Parameters
         self.ros_params = RosParameters()
         self.goal_selector = GoalSelector(
-            self.ros_params, initial_window_size=30, expansion_factor=1.2, clearance=0.1
+            self.ros_params, initial_window_size=100, expansion_factor=1.2, clearance=0.1
         )
         self.publish_rate = rospy.Rate(1)  # Hz (Goals published per second)
 
@@ -76,10 +76,9 @@ class ExplorationNode:
     def set_displays(self, goal):
         small_displays = self.goal_selector.possible_locations
         resolution = self.ros_params.map_resolution
-        markers = MarkerArrayDisplay(small_displays, goal, resolution, duration=1.0)
-        markers.refresh_targets_and_goal()
+        markers = GoalMarkerArray()
+        markers.display(small_displays, goal, resolution, duration=1.0)    
         
-
 
 if __name__ == '__main__':
     try:

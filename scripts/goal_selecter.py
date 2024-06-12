@@ -189,7 +189,7 @@ class GoalSelector:
         self.update_goal_selector(map_msg, odom_pose)
 
         if not self.possible_locations:
-            rospy.logwarn("No possible locations found.")
+            rospy.logwarn("No possible locations found.") 
             return None
 
         # Get robot's orientation in the map frame
