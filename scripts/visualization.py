@@ -43,7 +43,6 @@ class CustomMarker(Marker):
         self.lifetime = rospy.Duration(duration)
 
 
-
 class GoalMarkerArray:
     """
     Manages and publishes an array of markers to visualize exploration targets and goals.
@@ -58,6 +57,7 @@ class GoalMarkerArray:
             queue_size (int, optional): Size of the publisher queue. Defaults to 100.
         """
         self.marker_pub = rospy.Publisher(topic_name, MarkerArray, queue_size=queue_size)
+
 
     def display(self, possible_locations, goal, resolution, duration=0):
         """
