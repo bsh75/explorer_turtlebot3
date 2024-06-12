@@ -34,7 +34,7 @@ This ROS node implements a frontier-based exploration strategy for autonomous ro
 2. Clone the repository into your catkin workspace:
     ```bash
     cd ~/catkin_ws/src
-    git clone https://github.com/your-repository.git explorer_turtlebot3
+    git clone https://github.com/bsh75/explorer_turtlebot3.git
     ```
 3. Build the workspace:
     ```bash
