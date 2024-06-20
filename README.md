@@ -47,10 +47,17 @@ This ROS node implements a frontier-based exploration strategy for autonomous ro
     ```
 
 ## Usage
+Run Gazebo Simulation:
+```bash
+export TURTLEBOT3_MODEL=waffle
+roslaunch turtlebot3_gazebo turtlebot3_world.launch
+```
 
 To run the exploration node:
 ```bash
-roslaunch explorer_turtlebot3 exploration_node.launch
+export TURTLEBOT3_MODEL=waffle
+roslaunch explorer_turtlebot3 my_explorer.launch
+```
 
 ## Node Details
 
