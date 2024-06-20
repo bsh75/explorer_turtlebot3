@@ -1,6 +1,6 @@
-# Frontier-Based Autonomous Exploration
+# Autonomous Exploration
 
-This project is a ROS node for frontier-based autonomous exploration, designed to orchestrate a robot's exploration process. The node subscribes to the map and odometry topics, uses the `GoalSelector` to identify potential exploration goals, publishes markers in RViz to visualize these goals, and sends goals to the `move_base` action server for navigation.
+This project is a ROS node for autonomous exploration, designed to orchestrate a robot's exploration process. The node subscribes to the map and odometry topics, uses the `GoalSelector` to identify potential exploration goals, publishes markers in RViz to visualize these goals, and sends goals to the `move_base` action server for navigation. A simple state implementation has also been started.
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -21,7 +21,7 @@ This ROS node implements a frontier-based exploration strategy for autonomous ro
 ## Features
 
 - Subscribes to map and odometry topics.
-- Uses a `GoalSelector` to identify potential exploration goals.
+- Uses a custom `GoalSelector` to identify potential exploration goals.
 - Publishes markers in RViz to visualize these goals.
 - Sends goals to the `move_base` action server for navigation.
 - Monitors robot velocity to detect when the robot is stuck.
@@ -34,7 +34,7 @@ This ROS node implements a frontier-based exploration strategy for autonomous ro
 2. Clone the repository into your catkin workspace:
     ```bash
     cd ~/catkin_ws/src
-    git clone https://github.com/your-repository.git explorer_turtlebot3
+    git clone https://github.com/bsh75/explorer_turtlebot3.git
     ```
 3. Build the workspace:
     ```bash
